@@ -2,5 +2,5 @@ services:
   - type: web
     name: pdf-to-text-api
     env: python
-    buildCommand: ""
+    buildCommand: " "
     startCommand: gunicorn app:app
