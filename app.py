@@ -21,15 +21,11 @@ def extract_text():
         logging.error("No selected file")
         return jsonify({'error': 'No selected file'}), 400
 
-    # 使用臨時文件路徑
-    temp_path = tempfile.mktemp(suffix='.pdf')
-    logging.debug("Saving file to temp path: %s", temp_path)
-
     try:
-        file.save(temp_path)
-        if not os.path.exists(temp_path):
-            logging.error("Failed to save uploaded file")
-            return jsonify({'error': 'Failed to save uploaded file'}), 500
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
+            temp_path = temp_file.name
+            file.save(temp_path)
+            logging.debug("File saved to temporary path: %s", temp_path)
 
         logging.debug("Opening file with fitz")
         doc = fitz.open(temp_path)
@@ -49,4 +45,5 @@ def extract_text():
     return jsonify({'text': text})
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000).strip()))
+    port = int(str(os.environ.get("PORT", "10000")).strip())
+    app.run(host="0.0.0.0", port=port)
