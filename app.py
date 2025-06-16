@@ -13,11 +13,8 @@ logging.basicConfig(level=logging.DEBUG)
 def extract_text():
     logging.debug("Received request for /extract-text")
 
-    if 'files' not in request.files:
-        logging.error("No files part in request")
-        return jsonify({'error': 'No files part in the request'}), 400
-
-    files = request.files.getlist('files')
+    # 同時支援 'files' 和 'files[]'
+    files = request.files.getlist('files') or request.files.getlist('files[]')
     if not files:
         logging.error("No files uploaded")
         return jsonify({'error': 'No files uploaded'}), 400
