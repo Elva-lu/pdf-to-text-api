@@ -12,37 +12,44 @@ logging.basicConfig(level=logging.DEBUG)
 @app.route('/extract-text', methods=['POST'])
 def extract_text():
     logging.debug("Received request for /extract-text")
-    if 'file' not in request.files:
-        logging.error("No file part in request")
-        return jsonify({'error': 'No file part in the request'}), 400
 
-    file = request.files['file']
-    if file.filename == '':
-        logging.error("No selected file")
-        return jsonify({'error': 'No selected file'}), 400
+    if 'files' not in request.files:
+        logging.error("No files part in request")
+        return jsonify({'error': 'No files part in the request'}), 400
 
-    try:
-        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
-            temp_path = temp_file.name
-            file.save(temp_path)
-            logging.debug("File saved to temporary path: %s", temp_path)
+    files = request.files.getlist('files')
+    if not files:
+        logging.error("No files uploaded")
+        return jsonify({'error': 'No files uploaded'}), 400
 
-        logging.debug("Opening file with fitz")
-        doc = fitz.open(temp_path)
-        text = ""
-        for page in doc:
-            text += page.get_text()
-        doc.close()
-        logging.debug("PDF processed successfully")
-    except Exception as e:
-        logging.error("Error processing PDF: %s", str(e))
-        return jsonify({'error': str(e)}), 500
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-            logging.debug("Temporary file removed")
+    combined_text = ""
 
-    return jsonify({'text': text})
+    for file in files:
+        if file.filename == '':
+            logging.warning("Empty filename encountered, skipping")
+            continue
+
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
+                temp_path = temp_file.name
+                file.save(temp_path)
+                logging.debug("File saved to temporary path: %s", temp_path)
+
+            logging.debug("Opening file with fitz")
+            doc = fitz.open(temp_path)
+            for page in doc:
+                combined_text += page.get_text()
+            doc.close()
+            logging.debug("PDF processed successfully")
+        except Exception as e:
+            logging.error("Error processing PDF %s: %s", file.filename, str(e))
+            combined_text += f"\n[Error processing {file.filename}: {str(e)}]\n"
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+                logging.debug("Temporary file removed")
+
+    return jsonify({'text': combined_text})
 
 if __name__ == '__main__':
     port = int(str(os.environ.get("PORT", "10000")).strip())
