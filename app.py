@@ -34,6 +34,19 @@ def ocr_space_api_base64(file_stream, engine=2):
     except Exception as e:
         return f"[OCR API error: {str(e)}]"
 
+def clean_text(text):
+    try:
+        # 移除重複標題
+        text = re.sub(r'(衛生福利部\s*藥品不良反應通報表\s*)+', '', text)
+
+        # 移除多餘空白與換行
+        text = re.sub(r'\s+', ' ', text)
+
+        # 去除開頭與結尾空白
+        return text.strip()
+    except Exception as e:
+        return f"[Text cleaning error: {str(e)}]"
+
 def extract_text_from_pdf(file_stream):
     try:
         file_stream.seek(0)
@@ -41,7 +54,8 @@ def extract_text_from_pdf(file_stream):
         text = ""
         for page in doc:
             text += page.get_text()
-        return text
+        cleaned_text = clean_text(text)
+        return cleaned_text
     except Exception as e:
         return f"[PDF parsing error: {str(e)}]"
 
