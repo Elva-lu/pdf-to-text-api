@@ -70,9 +70,11 @@ def extract_text():
 
                 elif filename.startswith("TW-TFDA"):
                     raw_text = extract_text_from_pdf(file.stream)
+                    part_number = raw_text  # 直接複製 raw_text 到 part_number
 
                 else:
                     raw_text = "[Unsupported filename format]"
+                    part_number = "[Unsupported filename format]"
 
                 results.append({
                     'filename': filename,
