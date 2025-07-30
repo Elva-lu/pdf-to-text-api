@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import base64
 import requests
 import re
+import fitz  # PyMuPDF
 
 app = Flask(__name__)
 
@@ -25,6 +26,14 @@ def ocr_space_api_base64(file_stream, engine=2):
     )
     result = response.json()
     return result.get('ParsedResults', [{}])[0].get('ParsedText', '')
+
+def extract_text_from_pdf(file_stream):
+    file_stream.seek(0)
+    doc = fitz.open(stream=file_stream.read(), filetype="pdf")
+    text = ""
+    for page in doc:
+        text += page.get_text()
+    return text
 
 @app.route('/extract-text', methods=['POST'])
 def extract_text():
@@ -50,7 +59,8 @@ def extract_text():
                     part_number = f"料品號：{extracted}"
 
             elif filename.startswith("TW-TFDA"):
-                part_number = None
+                raw_text = extract_text_from_pdf(file.stream)
+                # 若未來需要從這類檔案中擷取其他欄位，可在這裡加上擷取邏輯
 
             results.append({
                 'filename': filename,
