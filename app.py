@@ -6,11 +6,12 @@ import re
 app = Flask(__name__)
 
 def extract_part_number_from_text(text):
-    # 尋找「料品號」欄位的值
-    match = re.search(r'料品號\s*[:：]?\s*(\S+)', text)
+    # 支援「料品號」在下一行的情況
+    match = re.search(r'料品號\s*[:：]?\s*\n?\s*(\S+)', text)
     return match.group(1) if match else None
 
 def ocr_space_api_base64(file_stream, engine=2):
+    file_stream.seek(0)  # 確保從頭讀取
     base64_data = base64.b64encode(file_stream.read()).decode()
     response = requests.post(
         'https://api.ocr.space/parse/image',
@@ -39,21 +40,28 @@ def extract_text():
             continue
 
         try:
-            file.stream.seek(0)
             filename = file.filename
             part_number = None
+            raw_text = ""
 
             if filename.startswith("C"):
-                text = ocr_space_api_base64(file.stream)
-                part_number = extract_part_number_from_text(text)
+                file.stream.seek(0)
+                raw_text = ocr_space_api_base64(file.stream)
+                print(f"OCR text for {filename}:\n{raw_text}")  # debug log
+                part_number = extract_part_number_from_text(raw_text)
+
             elif filename.startswith("TW-TFDA"):
-                text = "(PDF 轉文字邏輯尚未實作)"
+                raw_text = "(PDF 轉文字邏輯尚未實作)"
+                part_number = None
+
             else:
-                text = "(未知檔名格式)"
+                raw_text = "(未知檔名格式)"
+                part_number = None
 
             results.append({
                 'filename': filename,
-                'part_number': part_number
+                'part_number': part_number,
+                'raw_text': raw_text[:500]  # 可選：只回傳前 500 字避免太長
             })
 
         except Exception as e:
