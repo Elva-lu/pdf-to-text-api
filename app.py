@@ -12,7 +12,7 @@ def ocr_space_api(file_path):
             files={'file': f},
             data={
                 'apikey': 'K85762331988957',  # ← 填入你的 API Key
-                'language': 'cht','eng'        # 使用繁體中文 OCR
+                'language': 'cht',        # 使用繁體中文 OCR
                 'isOverlayRequired': False,
                 'OCREngine': 2
             },
