@@ -23,23 +23,30 @@ def ocr_space_api(file_path):
 
 @app.route('/extract-text', methods=['POST'])
 def extract_text():
-    file = request.files.get('file') or request.files.get('files') or request.files.get('files[]')
-    if not file or file.filename == '':
-        return jsonify({'error': 'No file uploaded'}), 400
+    files = request.files.getlist('file') or request.files.getlist('files') or request.files.getlist('files[]')
+    if not files:
+        return jsonify({'error': 'No files uploaded'}), 400
 
-    try:
-        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
-            temp_path = temp_file.name
-            file.save(temp_path)
+    combined_text = ""
 
-        text = ocr_space_api(temp_path)
-    except Exception as e:
-        return jsonify({'error': f'OCR failed: {str(e)}'}), 500
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+    for file in files:
+        if not file or file.filename == '':
+            continue
 
-    return jsonify({'text': text})
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
+                temp_path = temp_file.name
+                file.save(temp_path)
+
+            text = ocr_space_api(temp_path)
+            combined_text += f"\n--- {file.filename} ---\n{text}\n"
+        except Exception as e:
+            combined_text += f"\n[Error processing {file.filename}: {str(e)}]\n"
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    return jsonify({'text': combined_text})
 
 if __name__ == '__main__':
     port = int(str(os.environ.get("PORT", "10000")).strip())
