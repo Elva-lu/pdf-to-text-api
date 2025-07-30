@@ -1,4 +1,9 @@
+from flask import Flask, request, jsonify
+import base64
+import requests
 import re
+
+app = Flask(__name__)  # ✅ 必須在最前面定義
 
 def extract_part_numbers(text):
     pattern = r'\b[A-Za-z\s]+?\(\d+\)'
@@ -42,9 +47,9 @@ def extract_text():
                 text = ocr_space_api_base64(file.stream)
                 part_numbers += extract_part_numbers(text)
             elif filename.startswith("TW-TFDA"):
-                text = "（這裡放 PDF 轉文字的邏輯）"
+                text = "(這裡放 PDF 轉文字的邏輯)"
             else:
-                text = "（未知檔名格式，可選擇預設處理方式）"
+                text = "(未知檔名格式，可選擇預設處理方式)"
 
             combined_text += f"\n--- {filename} ---\n{text}\n"
 
@@ -55,3 +60,8 @@ def extract_text():
         'text': combined_text,
         'part_numbers': list(set(part_numbers))
     })
+
+if __name__ == '__main__':
+    import os
+    port = int(str(os.environ.get("PORT", "10000")).strip())
+    app.run(host="0.0.0.0", port=port)
