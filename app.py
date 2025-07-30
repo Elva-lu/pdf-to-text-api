@@ -14,7 +14,7 @@ def ocr_space_api(file_path):
             files={'file': f},
             data={
                 'apikey': 'K85762331988957',  # ← 在這裡填入你的 API Key
-                'language': 'cht','eng',        # 支援繁體中文可用 'chs'（簡體）或 'cht'（繁體）
+                'language': 'cht','eng'        # 支援繁體中文可用 'chs'（簡體）或 'cht'（繁體）
                 'isOverlayRequired': False,
                 'OCREngine': 2
             }
