@@ -3,11 +3,12 @@ import base64
 import requests
 import re
 
-app = Flask(__name__)  # ✅ 必須在最前面定義
+app = Flask(__name__)
 
-def extract_part_numbers(text):
-    pattern = r'\b[A-Za-z\s]+?\(\d+\)'
-    return re.findall(pattern, text)
+def extract_part_number_from_text(text):
+    # 尋找「料品號」欄位的值
+    match = re.search(r'料品號\s*[:：]?\s*(\S+)', text)
+    return match.group(1) if match else None
 
 def ocr_space_api_base64(file_stream, engine=2):
     base64_data = base64.b64encode(file_stream.read()).decode()
@@ -31,8 +32,7 @@ def extract_text():
     if not files:
         return jsonify({'error': 'No files uploaded'}), 400
 
-    combined_text = ""
-    part_numbers = []
+    results = []
 
     for file in files:
         if not file or file.filename == '':
@@ -41,25 +41,28 @@ def extract_text():
         try:
             file.stream.seek(0)
             filename = file.filename
+            part_number = None
 
-            # 判斷是否需要 OCR
             if filename.startswith("C"):
                 text = ocr_space_api_base64(file.stream)
-                part_numbers += extract_part_numbers(text)
+                part_number = extract_part_number_from_text(text)
             elif filename.startswith("TW-TFDA"):
-                text = "(這裡放 PDF 轉文字的邏輯)"
+                text = "(PDF 轉文字邏輯尚未實作)"
             else:
-                text = "(未知檔名格式，可選擇預設處理方式)"
+                text = "(未知檔名格式)"
 
-            combined_text += f"\n--- {filename} ---\n{text}\n"
+            results.append({
+                'filename': filename,
+                'part_number': part_number
+            })
 
         except Exception as e:
-            combined_text += f"\n[Error processing {file.filename}: {str(e)}]\n"
+            results.append({
+                'filename': file.filename,
+                'error': str(e)
+            })
 
-    return jsonify({
-        'text': combined_text,
-        'part_numbers': list(set(part_numbers))
-    })
+    return jsonify(results)
 
 if __name__ == '__main__':
     import os
