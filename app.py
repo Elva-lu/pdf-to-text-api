@@ -36,13 +36,8 @@ def ocr_space_api_base64(file_stream, engine=2):
 
 def clean_text(text):
     try:
-        # 移除重複標題
         text = re.sub(r'(衛生福利部\s*藥品不良反應通報表\s*)+', '', text)
-
-        # 移除多餘空白與換行
         text = re.sub(r'\s+', ' ', text)
-
-        # 去除開頭與結尾空白
         return text.strip()
     except Exception as e:
         return f"[Text cleaning error: {str(e)}]"
@@ -73,36 +68,51 @@ def extract_text():
                 continue
 
             filename = file.filename
-            part_number = None
-            raw_text = ""
+            result = {
+                'filename': filename,
+                'type': None,
+                'part_number': None,
+                'raw_text': None,
+                'field_status': None,
+                'error': None
+            }
 
             try:
                 if filename.startswith("C"):
+                    result['type'] = "C-type"
                     raw_text = ocr_space_api_base64(file.stream)
+                    result['raw_text'] = raw_text
                     extracted = extract_part_number_from_text(raw_text)
-                    part_number = f"料品號：{extracted}" if extracted else "[No part number found]"
+                    if extracted:
+                        result['part_number'] = extracted
+                        result['field_status'] = "part_number extracted"
+                    else:
+                        result['field_status'] = "part_number not found"
 
                 elif filename.startswith("TW-TFDA"):
+                    result['type'] = "TW-TFDA"
                     raw_text = extract_text_from_pdf(file.stream)
-                    part_number = raw_text  # 直接複製 raw_text 到 part_number
+                    result['raw_text'] = raw_text
+                    case_id_match = re.search(r'TW-TFDA-[A-Z0-9\-]+', raw_text)
+                    if case_id_match:
+                        result['part_number'] = case_id_match.group(0)
+                        result['field_status'] = "case_id extracted"
+                    else:
+                        result['field_status'] = "case_id not found"
 
                 else:
-                    raw_text = "[Unsupported filename format]"
-                    part_number = "[Unsupported filename format]"
-
-                results.append({
-                    'filename': filename,
-                    'part_number': part_number,
-                    'raw_text': raw_text
-                })
+                    result['type'] = "Unsupported"
+                    result['raw_text'] = "[Unsupported filename format]"
+                    result['part_number'] = None
+                    result['field_status'] = "unsupported filename format"
 
             except Exception as e:
-                results.append({
-                    'filename': filename,
-                    'error': str(e)
-                })
+                result['error'] = str(e)
+                result['field_status'] = "error during processing"
 
-        return jsonify(results)
+            results.append(result)
+
+        return jsonify({'results': results})
 
     except Exception as e:
         return jsonify({'error': 'Internal Server Error', 'details': str(e)}), 500
