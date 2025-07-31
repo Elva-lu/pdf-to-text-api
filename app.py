@@ -78,21 +78,29 @@ def extract_lab_results(text):
     return [{"date": d, "item": i.strip(), "value": v.strip()} for d, i, v in matches]
 
 def extract_drugs(text):
-    blocks = re.findall(r'許可證字號\s*(.*?)再投藥是否出現同樣反應', text)
+    # 分段：每筆藥物資料以商品名/學名開頭
+    blocks = re.findall(r'(商品名/學名[:：]?.*?)(?=商品名/學名[:：]?|$)', text, re.DOTALL)
     drugs = []
+
     for block in blocks:
         drugs.append({
-            "license": re.search(r'(?:衛署|衛部)?藥(?:製|輸|販)?字第\s*(\S+)', block).group(1) if re.search(r'(?:衛署|衛部)?藥(?:製|輸|販)?字第\s*(\S+)', block) else "",
-            "name": re.search(r'商品名(?:/學名)?\s*([^\s]+)', block).group(1) if re.search(r'商品名(?:/學名)?\s*([^\s]+)', block) else "",
-            "route": re.search(r'給藥途徑\s*([^\s]+)', block).group(1) if re.search(r'給藥途徑\s*([^\s]+)', block) else "",
-            "dosage": re.search(r'劑量/頻率\s*([^\s]+)', block).group(1) if re.search(r'劑量/頻率\s*([^\s]+)', block) else "",
-            "start_date": re.search(r'(?:起迄日期|使用日期)\s*(\d+年\d+月\d+日)', block).group(1) if re.search(r'(?:起迄日期|使用日期)\s*(\d+年\d+月\d+日)', block) else "",
-            "end_date": re.search(r'迄日期\s*(\d+年\d+月\d+日)', block).group(1) if re.search(r'迄日期\s*(\d+年\d+月\d+日)', block) else "",
-            "indication": re.search(r'用藥原因\s*([^\s]+)', block).group(1) if re.search(r'用藥原因\s*([^\s]+)', block) else "",
-            "manufacturer": re.search(r'(?:廠牌|藥廠)\s*([^\s]+)', block).group(1) if re.search(r'(?:廠牌|藥廠)\s*([^\s]+)', block) else "",
-            "action": re.search(r'處置情形\s*(停藥|減量|增加|未改變|未知)', block).group(1) if re.search(r'處置情形\s*(停藥|減量|增加|未改變|未知)', block) else "",
-            "rechallenge": re.search(r'再投藥是否出現同樣反應\s*([^\s]+)', block).group(1) if re.search(r'再投藥是否出現同樣反應\s*([^\s]+)', block) else ""
+            "license": re.search(r'許可證字號[:：]?\s*(\S+)', block).group(1) if re.search(r'許可證字號[:：]?\s*(\S+)', block) else "",
+            "name": re.search(r'商品名/學名[:：]?\s*([^\n]+)', block).group(1).strip() if re.search(r'商品名/學名[:：]?\s*([^\n]+)', block) else "",
+            "dosage": re.search(r'劑量[:：]?\s*([^\n]+)', block).group(1).strip() if re.search(r'劑量[:：]?\s*([^\n]+)', block) else "",
+            "route": re.search(r'用法[:：]?\s*([^\n]+)', block).group(1).strip() if re.search(r'用法[:：]?\s*([^\n]+)', block) else "",
+            "start_date": re.search(r'開始日期[:：]?\s*(\d+年\d+月\d+日)', block).group(1) if re.search(r'開始日期[:：]?\s*(\d+年\d+月\d+日)', block) else "",
+            "end_date": re.search(r'結束日期[:：]?\s*(\d+年\d+月\d+日)', block).group(1) if re.search(r'結束日期[:：]?\s*(\d+年\d+月\d+日)', block) else "",
+            "indication": re.search(r'(?:用藥原因|用途原因)[:：]?\s*([^\n]+)', block).group(1).strip() if re.search(r'(?:用藥原因|用途原因)[:：]?\s*([^\n]+)', block) else "",
+            "manufacturer": re.search(r'(?:廠牌|藥廠|副作用|批號)[:：]?\s*([^\n]+)', block).group(1).strip() if re.search(r'(?:廠牌|藥廠|副作用|批號)[:：]?\s*([^\n]+)', block) else "",
+            "action": re.search(r'(停藥|降低劑量|增加劑量|未改變劑量|未知)', block).group(1) if re.search(r'(停藥|降低劑量|增加劑量|未改變劑量|未知)', block) else "",
+            "rechallenge": re.search(r'(有再投予且不良反應發生|有再投予但不良反應未發生|有再投予但結果未知|沒有再投予或未知)', block).group(1) if re.search(r'(有再投予且不良反應發生|有再投予但不良反應未發生|有再投予但結果未知|沒有再投予或未知)', block) else "",
+            "relation": {
+                "suspected": "可疑藥品" in block,
+                "concomitant": "併用產品" in block,
+                "interaction": "交互作用藥品" in block
+            }
         })
+
     return drugs
 
 def extract_medical_history(text):
