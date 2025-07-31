@@ -131,11 +131,16 @@ def extract_text():
         part_number_json = None
 
         try:
-            if filename.startswith("C"):
-                raw_text = ocr_space_api_base64(file.stream)
-                extracted = extract_part_number_from_text(raw_text)
-                part_number = f"料品號：{extracted}" if extracted else "[No part number found]"
-                part_number_json = {"part_number": extracted} if extracted else {}
+            
+        if filename.startswith("C"):
+          raw_text = ocr_space_api_base64(file.stream)
+          extracted = extract_part_number_from_text(raw_text)
+          part_number = f"料品號：{extracted}" if extracted else "[No part number found]"
+
+          structured_json = {
+          "part_number": extracted if extracted else ""
+          }
+
 
             elif filename.startswith("TW-TFDA"):
                 raw_text = extract_text_from_pdf(file.stream)
