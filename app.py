@@ -132,51 +132,50 @@ def extract_text():
         if not file or file.filename == '':
             continue
 
-        filename = file.filename
-        raw_text = ""
-        part_number = None
-        structured_json = None
-        part_number_json = None
+        try:
+            filename = file.filename
+            raw_text = ""
+            part_number = None
+            structured_json = None
 
-try:
-    if filename.startswith("C"):
-        raw_text = ocr_space_api_base64(file.stream)
-        extracted = extract_part_number_from_text(raw_text)
-        part_number = f"料號識別: {extracted}" if extracted else "[No part number found]"
+            if filename.startswith("C"):
+                raw_text = ocr_space_api_base64(file.stream)
+                extracted = extract_part_number_from_text(raw_text)
+                part_number = f"料號識別: {extracted}" if extracted else "[No part number found]"
 
-        structured_json = {
-            "part_number": extracted if extracted else ""
-        }
+                structured_json = {
+                    "part_number": extracted if extracted else ""
+                }
 
-    elif filename.startswith("TW-TFDA"):
-        raw_text = extract_text_from_pdf(file.stream)
-        structured_json = {
-            "case_id": extract_case_id(raw_text),
-            "reporter": {},
-            "patient": extract_patient_info(raw_text),
-            "adverse_event": extract_adverse_event(raw_text),
-            "medical_history": extract_medical_history(raw_text),
-            "lab_results": extract_lab_results(raw_text),
-            "drugs": extract_drugs(raw_text)
-        }
-        part_number = "[TFDA structured JSON]"
+            elif filename.startswith("TW-TFDA"):
+                raw_text = extract_text_from_pdf(file.stream)
+                structured_json = {
+                    "case_id": extract_case_id(raw_text),
+                    "reporter": {},
+                    "patient": extract_patient_info(raw_text),
+                    "adverse_event": extract_adverse_event(raw_text),
+                    "medical_history": extract_medical_history(raw_text),
+                    "lab_results": extract_lab_results(raw_text),
+                    "drugs": extract_drugs(raw_text)
+                }
+                part_number = "[TFDA structured JSON]"
 
-    else:
-        raw_text = "[Unsupported filename format]"
-        part_number = "[Unsupported filename format]"
+            else:
+                raw_text = "[Unsupported filename format]"
+                part_number = "[Unsupported filename format]"
 
-    results.append({
-        'filename': filename,
-        'part_number': part_number,
-        'raw_text': raw_text,
-        'structured_json': structured_json
-    })
+            results.append({
+                'filename': filename,
+                'part_number': part_number,
+                'raw_text': raw_text,
+                'structured_json': structured_json
+            })
 
-except Exception as e:
-    results.append({
-        'filename': filename,
-        'error': str(e)
-    })
+        except Exception as e:
+            results.append({
+                'filename': file.filename,
+                'error': str(e)
+            })
 
     return jsonify(results)
 
