@@ -68,17 +68,29 @@ def extract_severity_flags(text):
     ]
     results = []
     for label in severity_labels:
-        if re.search(rf"[■☑✓\[\( ]?\s*{label}", text):
+        pattern = rf"(■|☑|✓|√|\[ ?[xX]?\]|\( ?[xX]?\))?\s*{re.escape(label)}"
+        if re.search(pattern, text):
             results.append(label)
     return results
 
 def extract_adverse_event(text):
     date_match = re.search(r'不良反應發生日期\s*(\d+年\d+月\d+日)', text)
-    severity_matches = extract_severity_flags(text)
+    
+    try:
+        severity_matches = extract_severity_flags(text)
+    except Exception as e:
+        print(f"[WARNING] extract_severity_flags failed: {e}")
+        severity_matches = []  # 判斷失敗就留空
+
     symptoms_matches = re.findall(r'不良反應症狀\s*([^\n]+)', text)
-    desc_match = re.search(r'通報案件之描述\s*(.*?)\s*(相關檢查|不良反應後續結果)', text)
-    description = desc_match.group(1).strip() if desc_match else ""
-    outcome_match = re.search(r'不良反應後續結果\s*(已恢復已解決|恢復中解決中|尚未恢復|已恢復解決但有後遺症|死亡|未知)', text)
+
+    desc_match = re.search(r'通報案件之描述\s*(.*?)\s*(相關檢查|不良反應後續結果)', text, re.DOTALL)
+    description = desc_match.group(1).strip() if desc_match and desc_match.group(1) else ""
+
+    outcome_match = re.search(
+        r'不良反應後續結果\s*(已恢復已解決|恢復中解決中|尚未恢復|已恢復解決但有後遺症|死亡|未知)',
+        text
+    )
 
     return {
         "date": date_match.group(1) if date_match else "",
