@@ -182,6 +182,11 @@ def extract_text():
                 'error': str(e)
             })
 
+    import json
+    for item in results:
+        if "structured_json" in item and isinstance(item["structured_json"], dict):
+            item["structured_json"] = json.dumps(item["structured_json"], ensure_ascii=False)
+
     return jsonify(results)
 
 # ---------- 啟動 Flask ----------
