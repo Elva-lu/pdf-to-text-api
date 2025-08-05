@@ -187,11 +187,11 @@ def extract_text():
         if "structured_json" in item and isinstance(item["structured_json"], dict):
             item["structured_json"] = json.dumps(item["structured_json"], ensure_ascii=False)
 
-return app.response_class(
-    response=json.dumps(results, ensure_ascii=False),  # 👈 確保中文不被轉義成 \uXXXX
-    status=200,
-    mimetype='application/json'
-)
+    return app.response_class(  # ✅ ← 現在縮排正確了
+        response=json.dumps(results, ensure_ascii=False),
+        status=200,
+        mimetype='application/json'
+    )
 
 # ---------- 啟動 Flask ----------
 if __name__ == '__main__':
