@@ -56,9 +56,25 @@ def extract_patient_info(text):
         "age": int(re.search(r'(\d+)\s*歲', text).group(1)) if re.search(r'(\d+)\s*歲', text) else None
     }
 
+def extract_severity_flags(text):
+    severity_labels = [
+        "死亡",
+        "危及生命",
+        "永久性殘疾",
+        "胎兒、嬰兒先天性畸形",
+        "病人住院或延長病人住院時間",
+        "其他可能導致永久性傷害之併發症",
+        "非嚴重"
+    ]
+    results = []
+    for label in severity_labels:
+        if re.search(rf"[■☑✓\[\( ]?\s*{label}", text):
+            results.append(label)
+    return results
+
 def extract_adverse_event(text):
     date_match = re.search(r'不良反應發生日期\s*(\d+年\d+月\d+日)', text)
-    severity_matches = re.findall(r'不良反應嚴重性\s*(死亡|危及生命|永久性殘疾|胎兒、嬰兒先天性畸形|病人住院或延長病人住院時間|其他可能導致永久性傷害之併發症|非嚴重)', text)
+    severity_matches = extract_severity_flags(text)
     symptoms_matches = re.findall(r'不良反應症狀\s*([^\n]+)', text)
     desc_match = re.search(r'通報案件之描述\s*(.*?)\s*(相關檢查|不良反應後續結果)', text)
     description = desc_match.group(1).strip() if desc_match else ""
