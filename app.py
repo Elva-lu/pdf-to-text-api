@@ -83,10 +83,10 @@ def extract_drugs(text):
     drugs = []
 
     def clean_quotes(val):
-        return val.replace('"', "'") if val else val
+        return re.sub(r"[\"']", " ", val) if val else val
 
     for block in blocks:
-        block = block.replace('"', "'")  # ← ✅ 清整段 block 的雙引號
+        block = re.sub(r"[\"']", " ", block)  # ← ✅ 將整段 block 的引號都換成空白
 
         drugs.append({
             "license": clean_quotes(re.search(r'許可證字號[:：]?\s*(\S+)', block).group(1)) if re.search(r'許可證字號[:：]?\s*(\S+)', block) else "",
