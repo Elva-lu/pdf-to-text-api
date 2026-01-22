@@ -3,6 +3,8 @@ import base64
 import requests
 import re
 import fitz  # PyMuPDF
+import json
+import os
 
 app = Flask(__name__)
 
@@ -41,7 +43,13 @@ def extract_part_number_from_text(text):
     match = re.search(r'料品號\s*[:：]?\s*\n?\s*(\S+)', text)
     return match.group(1) if match else None
 
-# ---------- 結構化解析 ----------
+# ✅ 新增：擷取怨訴編號的函數
+def extract_complaint_id_from_text(text):
+    # 假設格式為 "怨訴編號: XXXXX"
+    match = re.search(r'怨訴編號\s*[:：]?\s*\n?\s*(\S+)', text)
+    return match.group(1) if match else None
+
+# ---------- 結構化解析 (TFDA 相關) ----------
 
 def extract_case_id(text):
     match = re.search(r'TW-TFDA-TDS-\d+', text)
@@ -80,7 +88,7 @@ def extract_adverse_event(text):
         severity_matches = extract_severity_flags(text)
     except Exception as e:
         print(f"[WARNING] extract_severity_flags failed: {e}")
-        severity_matches = []  # 判斷失敗就留空
+        severity_matches = [] 
 
     symptoms_matches = re.findall(r'不良反應症狀\s*([^\n]+)', text)
 
@@ -106,7 +114,6 @@ def extract_lab_results(text):
     return [{"date": d, "item": i.strip(), "value": v.strip()} for d, i, v in matches]
 
 def extract_drugs(text):
-    # 分段：每筆藥物資料以商品名/學名開頭
     blocks = re.findall(r'(商品名/學名[:：]?.*?)(?=商品名/學名[:：]?|$)', text, re.DOTALL)
     drugs = []
 
@@ -114,7 +121,7 @@ def extract_drugs(text):
         return re.sub(r"[\"']", " ", val) if val else val
 
     for block in blocks:
-        block = re.sub(r"[\"']", " ", block)  # ← ✅ 將整段 block 的引號都換成空白
+        block = re.sub(r"[\"']", " ", block) 
 
         drugs.append({
             "license": clean_quotes(re.search(r'許可證字號[:：]?\s*(\S+)', block).group(1)) if re.search(r'許可證字號[:：]?\s*(\S+)', block) else "",
@@ -172,15 +179,36 @@ def extract_text():
             structured_json = None
 
             if filename.startswith("C"):
+                # 針對 C 開頭的檔案進行 OCR
                 raw_text = ocr_space_api_base64(file.stream)
-                extracted = extract_part_number_from_text(raw_text)
-                part_number = f"料號識別: {extracted}" if extracted else "[No part number found]"
+                
+                # 擷取料號
+                extracted_part = extract_part_number_from_text(raw_text)
+                
+                # ✅ 擷取怨訴編號
+                extracted_complaint = extract_complaint_id_from_text(raw_text)
+                
+                # 組合字串給前端顯示 (summary)
+                part_info = f"料號: {extracted_part}" if extracted_part else ""
+                complaint_info = f"怨訴編號: {extracted_complaint}" if extracted_complaint else ""
+                
+                if part_info and complaint_info:
+                    part_number = f"{part_info}, {complaint_info}"
+                elif part_info:
+                    part_number = part_info
+                elif complaint_info:
+                    part_number = complaint_info
+                else:
+                    part_number = "[No part number or complaint ID found]"
 
+                # ✅ 建立結構化 JSON
                 structured_json = {
-                    "part_number": extracted if extracted else ""
+                    "part_number": extracted_part if extracted_part else "",
+                    "complaint_id": extracted_complaint if extracted_complaint else ""
                 }
 
             elif filename.startswith("TW-TFDA"):
+                # 針對 TW-TFDA 開頭的檔案進行 PDF 文字解析
                 raw_text = extract_text_from_pdf(file.stream)
                 structured_json = {
                     "case_id": extract_case_id(raw_text),
@@ -210,12 +238,12 @@ def extract_text():
                 'error': str(e)
             })
 
-    import json
+    # 將 structured_json 轉為字串 (維持您原有的邏輯)
     for item in results:
         if "structured_json" in item and isinstance(item["structured_json"], dict):
             item["structured_json"] = json.dumps(item["structured_json"], ensure_ascii=False)
 
-    return app.response_class(  # ✅ ← 現在縮排正確了
+    return app.response_class(
         response=json.dumps(results, ensure_ascii=False),
         status=200,
         mimetype='application/json'
@@ -223,6 +251,5 @@ def extract_text():
 
 # ---------- 啟動 Flask ----------
 if __name__ == '__main__':
-    import os
     port = int(str(os.environ.get("PORT", "10000")).strip())
     app.run(host="0.0.0.0", port=port)
