@@ -45,7 +45,7 @@ def extract_part_number_from_text(text):
 
 # ✅ 新增：擷取怨訴編號的函數
 def extract_complaint_id_from_text(text):
-    # 假設格式為 "怨訴編號: XXXXX"
+    # 假設格式為 "怨訴編號: CX20XXXXX"
     match = re.search(r'怨訴編號\s*[:：]?\s*\n?\s*(\S+)', text)
     return match.group(1) if match else None
 
