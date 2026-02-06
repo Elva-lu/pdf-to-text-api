@@ -40,24 +40,17 @@ def ocr_space_api_base64(file_stream, engine=2):
     return result.get('ParsedResults', [{}])[0].get('ParsedText', '')
 
 def extract_part_number_from_text(text):
-    match = re.search(r'料品號\s*[:：]?\s*\n?\s*(\S+)', text)
-    return match.group(1) if match else None
+    match = re.search(r'料品號\s*[:：]?\s*(\S+)', text)
+    return match.group(1) if match else ""
 
-# ✅ 新增：擷取怨訴編號的函數
-def extract_complaint_id_from_text(text):
-    # 1️⃣ 先把 OCR 產生的各種空白清掉
-    normalized = re.sub(r'\s+', '', text)
-    normalized = normalized.replace('\u3000', '')  # 全形空白
-    normalized = normalized.replace('\xa0', '')    # 不斷行空白
+# ✅【重點】直接從檔名抓怨訴編號（不走 OCR）
+def extract_complaint_id_from_filename(filename):
+    name = os.path.splitext(os.path.basename(filename))[0]
+    name = re.sub(r'[\s._-]+', '', name)
+    m = re.search(r'([A-Z]{2}\d{5,})', name, re.IGNORECASE)
+    return m.group(1).upper() if m else ""
 
-    # 2️⃣ 再抓怨訴編號
-    # 假設格式為 "怨訴編號: CX20XXXXX"
-    # 直接搜尋符合 "2個大寫英文 + 5個以上數字" 的格式
-    # 例如：CC2026001, CX2026004
-    match = re.search(r'([A-Z]{2}\d{5,})', normalized, re.IGNORECASE)
-    return match.group(1).upper() if match else None
-
-# ---------- 結構化解析 (TFDA 相關) ----------
+# ---------- TFDA 結構化解析 ----------
 
 def extract_case_id(text):
     match = re.search(r'TW-TFDA-TDS-\d+', text)
@@ -73,97 +66,15 @@ def extract_patient_info(text):
     }
 
 def extract_severity_flags(text):
-    severity_labels = [
-        "死亡",
-        "危及生命",
-        "永久性殘疾",
-        "胎兒、嬰兒先天性畸形",
-        "病人住院或延長病人住院時間",
-        "其他可能導致永久性傷害之併發症",
-        "非嚴重"
-    ]
-    results = []
-    for label in severity_labels:
-        pattern = rf"(■|☑|✓|√|\[ ?[xX]?\]|\( ?[xX]?\))?\s*{re.escape(label)}"
-        if re.search(pattern, text):
-            results.append(label)
-    return results
+    labels = ["死亡", "危及生命", "永久性殘疾", "胎兒、嬰兒先天性畸形",
+              "病人住院或延長病人住院時間", "其他可能導致永久性傷害之併發症", "非嚴重"]
+    return [l for l in labels if l in text]
 
 def extract_adverse_event(text):
-    date_match = re.search(r'不良反應發生日期\s*(\d+年\d+月\d+日)', text)
-    
-    try:
-        severity_matches = extract_severity_flags(text)
-    except Exception as e:
-        print(f"[WARNING] extract_severity_flags failed: {e}")
-        severity_matches = [] 
-
-    symptoms_matches = re.findall(r'不良反應症狀\s*([^\n]+)', text)
-
-    desc_match = re.search(r'通報案件之描述\s*(.*?)\s*(相關檢查|不良反應後續結果)', text, re.DOTALL)
-    description = desc_match.group(1).strip() if desc_match and desc_match.group(1) else ""
-
-    outcome_match = re.search(
-        r'不良反應後續結果\s*(已恢復已解決|恢復中解決中|尚未恢復|已恢復解決但有後遺症|死亡|未知)',
-        text
-    )
-
     return {
-        "date": date_match.group(1) if date_match else "",
-        "severity": severity_matches,
-        "symptoms": symptoms_matches,
-        "description": description,
-        "outcome": outcome_match.group(1) if outcome_match else ""
-    }
-
-def extract_lab_results(text):
-    pattern = r'(\d{3,4}年\d{1,2}月\d{1,2}日)[^\n]*?([A-Za-z0-9\(\)/]+)[^\n]*?[=:]\s*([\d\.]+[^\s\n]*)'
-    matches = re.findall(pattern, text)
-    return [{"date": d, "item": i.strip(), "value": v.strip()} for d, i, v in matches]
-
-def extract_drugs(text):
-    blocks = re.findall(r'(商品名/學名[:：]?.*?)(?=商品名/學名[:：]?|$)', text, re.DOTALL)
-    drugs = []
-
-    def clean_quotes(val):
-        return re.sub(r"[\"']", " ", val) if val else val
-
-    for block in blocks:
-        block = re.sub(r"[\"']", " ", block) 
-
-        drugs.append({
-            "license": clean_quotes(re.search(r'許可證字號[:：]?\s*(\S+)', block).group(1)) if re.search(r'許可證字號[:：]?\s*(\S+)', block) else "",
-            "name": clean_quotes(re.search(r'商品名/學名[:：]?\s*([^\n]+)', block).group(1).strip()) if re.search(r'商品名/學名[:：]?\s*([^\n]+)', block) else "",
-            "dosage": clean_quotes(re.search(r'劑量[:：]?\s*([^\n]+)', block).group(1).strip()) if re.search(r'劑量[:：]?\s*([^\n]+)', block) else "",
-            "route": clean_quotes(re.search(r'用法[:：]?\s*([^\n]+)', block).group(1).strip()) if re.search(r'用法[:：]?\s*([^\n]+)', block) else "",
-            "start_date": re.search(r'開始日期[:：]?\s*(\d+年\d+月\d+日)', block).group(1) if re.search(r'開始日期[:：]?\s*(\d+年\d+月\d+日)', block) else "",
-            "end_date": re.search(r'結束日期[:：]?\s*(\d+年\d+月\d+日)', block).group(1) if re.search(r'結束日期[:：]?\s*(\d+年\d+月\d+日)', block) else "",
-            "indication": clean_quotes(re.search(r'(?:用藥原因|用途原因)[:：]?\s*([^\n]+)', block).group(1).strip()) if re.search(r'(?:用藥原因|用途原因)[:：]?\s*([^\n]+)', block) else "",
-            "manufacturer": clean_quotes(re.search(r'(?:廠牌|藥廠|副作用|批號)[:：]?\s*([^\n]+)', block).group(1).strip()) if re.search(r'(?:廠牌|藥廠|副作用|批號)[:：]?\s*([^\n]+)', block) else "",
-            "action": re.search(r'(停藥|降低劑量|增加劑量|未改變劑量|未知)', block).group(1) if re.search(r'(停藥|降低劑量|增加劑量|未改變劑量|未知)', block) else "",
-            "rechallenge": re.search(r'(有再投予且不良反應發生|有再投予但不良反應未發生|有再投予但結果未知|沒有再投予或未知)', block).group(1) if re.search(r'(有再投予且不良反應發生|有再投予但不良反應未發生|有再投予但結果未知|沒有再投予或未知)', block) else "",
-            "relation": {
-                "suspected": "可疑藥品" in block,
-                "concomitant": "併用產品" in block,
-                "interaction": "交互作用藥品" in block
-            }
-        })
-
-    return drugs
-
-def extract_medical_history(text):
-    block_match = re.search(r'其他相關資訊.*?(\(請提供.*?\))?(.*?)用藥原因', text)
-    block = block_match.group(2).strip() if block_match else ""
-    diagnosis = re.findall(r'診斷\d*[:：]?\s*([^\[#\\n]+)', block)
-    allergy = re.search(r'過敏[:：]?\s*([^\[#\\n]+)', block)
-    smoking = re.search(r'(吸菸|飲酒)[^\n]*?(無|有)', block)
-    liver_kidney = re.search(r'(肝|腎)[^\n]*?(功能)?[^\n]*?(正常|異常|NA|無)', block)
-
-    return {
-        "diagnosis": diagnosis if diagnosis else [],
-        "allergy": allergy.group(1).strip() if allergy else "無",
-        "smoking_alcohol": smoking.group(2) if smoking else "無",
-        "liver_kidney_function": liver_kidney.group(3) if liver_kidney else "未知"
+        "date": re.search(r'不良反應發生日期\s*(\d+年\d+月\d+日)', text).group(1)
+        if re.search(r'不良反應發生日期\s*(\d+年\d+月\d+日)', text) else "",
+        "severity": extract_severity_flags(text)
     }
 
 # ---------- API ----------
@@ -177,87 +88,55 @@ def extract_text():
     results = []
 
     for file in files:
-        if not file or file.filename == '':
-            continue
-
         try:
             filename = file.filename
             raw_text = ""
-            part_number = None
-            structured_json = None
+            structured_json = {}
 
+            # ===== C 開頭檔案：直接用檔名 =====
             if filename.startswith("C"):
-                # 針對 C 開頭的檔案進行 OCR
-                raw_text = ocr_space_api_base64(file.stream)
-                
-                # 擷取料號
-                extracted_part = extract_part_number_from_text(raw_text)
-                
-                # ✅ 擷取怨訴編號
-                extracted_complaint = extract_complaint_id_from_text(raw_text)
-                
-                # 組合字串給前端顯示 (summary)
-                part_info = f"料號: {extracted_part}" if extracted_part else ""
-                complaint_info = f"怨訴編號: {extracted_complaint}" if extracted_complaint else ""
-                
-                if part_info and complaint_info:
-                    part_number = f"{part_info}, {complaint_info}"
-                elif part_info:
-                    part_number = part_info
-                elif complaint_info:
-                    part_number = complaint_info
-                else:
-                    part_number = "[No part number or complaint ID found]"
+                complaint_id = extract_complaint_id_from_filename(filename)
 
-                # ✅ 建立結構化 JSON
                 structured_json = {
-                    "part_number": extracted_part if extracted_part else "",
-                    "complaint_id": extracted_complaint if extracted_complaint else ""
+                    "part_number": "",
+                    "complaint_id": complaint_id
                 }
 
+                part_number = f"怨訴編號: {complaint_id}" if complaint_id else "[No complaint ID found]"
+
+            # ===== TFDA PDF =====
             elif filename.startswith("TW-TFDA"):
-                # 針對 TW-TFDA 開頭的檔案進行 PDF 文字解析
                 raw_text = extract_text_from_pdf(file.stream)
                 structured_json = {
                     "case_id": extract_case_id(raw_text),
-                    "reporter": {},
                     "patient": extract_patient_info(raw_text),
-                    "adverse_event": extract_adverse_event(raw_text),
-                    "medical_history": extract_medical_history(raw_text),
-                    "lab_results": extract_lab_results(raw_text),
-                    "drugs": extract_drugs(raw_text)
+                    "adverse_event": extract_adverse_event(raw_text)
                 }
                 part_number = "[TFDA structured JSON]"
 
             else:
-                raw_text = "[Unsupported filename format]"
                 part_number = "[Unsupported filename format]"
 
             results.append({
-                'filename': filename,
-                'part_number': part_number,
-                'raw_text': raw_text,
-                'structured_json': structured_json
+                "filename": filename,
+                "part_number": part_number,
+                "raw_text": raw_text,
+                "structured_json": json.dumps(structured_json, ensure_ascii=False)
             })
 
         except Exception as e:
             results.append({
-                'filename': file.filename,
-                'error': str(e)
+                "filename": file.filename,
+                "error": str(e)
             })
-
-    # 將 structured_json 轉為字串 (維持您原有的邏輯)
-    for item in results:
-        if "structured_json" in item and isinstance(item["structured_json"], dict):
-            item["structured_json"] = json.dumps(item["structured_json"], ensure_ascii=False)
 
     return app.response_class(
         response=json.dumps(results, ensure_ascii=False),
         status=200,
-        mimetype='application/json'
+        mimetype="application/json"
     )
 
-# ---------- 啟動 Flask ----------
-if __name__ == '__main__':
-    port = int(str(os.environ.get("PORT", "10000")).strip())
+# ---------- 啟動 ----------
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", "10000"))
     app.run(host="0.0.0.0", port=port)
