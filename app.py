@@ -45,12 +45,17 @@ def extract_part_number_from_text(text):
 
 # ✅ 新增：擷取怨訴編號的函數
 def extract_complaint_id_from_text(text):
+    # 1️⃣ 先把 OCR 產生的各種空白清掉
+    normalized = re.sub(r'\s+', '', text)
+    normalized = normalized.replace('\u3000', '')  # 全形空白
+    normalized = normalized.replace('\xa0', '')    # 不斷行空白
+
+    # 2️⃣ 再抓怨訴編號
     # 假設格式為 "怨訴編號: CX20XXXXX"
     # 直接搜尋符合 "2個大寫英文 + 5個以上數字" 的格式
     # 例如：CC2026001, CX2026004
-    # \b 代表單字邊界，確保只抓取獨立的編號
-    match = re.search(r'\b([A-Z]{2}\d{5,})\b', text)
-    return match.group(1) if match else None
+    match = re.search(r'([A-Z]{2}\d{5,})', normalized, re.IGNORECASE)
+    return match.group(1).upper() if match else None
 
 # ---------- 結構化解析 (TFDA 相關) ----------
 
