@@ -14,9 +14,7 @@ app = Flask(__name__)
 def clean_text(text: str) -> str:
     if not text:
         return ""
-    # 常見 OCR 會出現的全形空白
     text = text.replace("\u3000", " ")
-    # 合併各種空白（含換行、tab）
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
@@ -31,33 +29,57 @@ def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
         text += page.get_text() or ""
     return clean_text(text)
 
-def ocr_space_api_base64_from_bytes(pdf_bytes: bytes, engine=2) -> str:
-    # 建議改用環境變數：OCR_SPACE_API_KEY
+def ocr_space_post(data: dict, timeout=90) -> dict:
     api_key = os.environ.get("OCR_SPACE_API_KEY", "K85762331988957")
+    payload = {"apikey": api_key, **data}
+    r = requests.post("https://api.ocr.space/parse/image", data=payload, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
 
-    base64_data = base64.b64encode(pdf_bytes).decode()
-    response = requests.post(
-        "https://api.ocr.space/parse/image",
-        data={
-            "apikey": api_key,
-            "language": "cht",
-            "isOverlayRequired": False,
-            "OCREngine": engine,
-            "base64Image": f"data:application/pdf;base64,{base64_data}",
-        },
-        timeout=60
-    )
-    response.raise_for_status()
-    result = response.json()
-
+def ocr_space_pdf_base64(pdf_bytes: bytes, engine=2, language="cht") -> tuple[str, dict]:
+    b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+    result = ocr_space_post({
+        "language": language,
+        "isOverlayRequired": False,
+        "OCREngine": engine,
+        # 有些情況加 filetype 會更穩
+        "filetype": "PDF",
+        "detectOrientation": True,
+        "base64Image": f"data:application/pdf;base64,{b64}",
+    })
+    text = ""
     parsed = result.get("ParsedResults") or []
-    if not parsed:
-        return ""
-    return parsed[0].get("ParsedText", "") or ""
+    if parsed:
+        text = parsed[0].get("ParsedText") or ""
+    return clean_text(text), result
 
-def extract_part_number_from_text(text):
-    match = re.search(r"料品號\s*[:：]?\s*\n?\s*(\S+)", text)
-    return match.group(1) if match else ""
+def pdf_pages_to_png_bytes(pdf_bytes: bytes, max_pages=3, zoom=2.0) -> list[bytes]:
+    """
+    把 PDF 前 max_pages 頁轉成 PNG bytes
+    zoom 越大越清楚，但越大越慢/越大檔
+    """
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    images = []
+    mat = fitz.Matrix(zoom, zoom)
+    for i in range(min(len(doc), max_pages)):
+        pix = doc[i].get_pixmap(matrix=mat, alpha=False)
+        images.append(pix.tobytes("png"))
+    return images
+
+def ocr_space_image_base64(image_bytes: bytes, engine=2, language="cht") -> tuple[str, dict]:
+    b64 = base64.b64encode(image_bytes).decode("utf-8")
+    result = ocr_space_post({
+        "language": language,
+        "isOverlayRequired": False,
+        "OCREngine": engine,
+        "detectOrientation": True,
+        "base64Image": f"data:image/png;base64,{b64}",
+    })
+    text = ""
+    parsed = result.get("ParsedResults") or []
+    if parsed:
+        text = parsed[0].get("ParsedText") or ""
+    return clean_text(text), result
 
 # ✅ 直接從檔名抓怨訴編號（不 OCR）
 def extract_complaint_id_from_filename(filename):
@@ -93,22 +115,15 @@ def extract_severity_flags(text):
     ]
     results = []
     for label in severity_labels:
-        # OCR 可能把符號亂掉，所以只要出現標籤就先收（保守）
         pattern = rf"(■|☑|✓|√|\[ ?[xX]?\]|\( ?[xX]?\))?\s*{re.escape(label)}"
         if re.search(pattern, text):
             results.append(label)
     return results
 
 def extract_adverse_event(text):
-    # OCR 可能把「不良反應發生日期」拆開，所以 regex 放寬
     date_match = re.search(r"不良反應\s*發生\s*日期\s*(\d+年\d+月\d+日)", text)
 
-    try:
-        severity_matches = extract_severity_flags(text)
-    except Exception as e:
-        print(f"[WARNING] extract_severity_flags failed: {e}")
-        severity_matches = []
-
+    severity_matches = extract_severity_flags(text)
     symptoms_matches = re.findall(r"不良反應\s*症狀\s*([^\n]+)", text)
 
     desc_match = re.search(r"通報案件之描述\s*(.*?)\s*(相關檢查|不良反應後續結果)", text, re.DOTALL)
@@ -141,35 +156,30 @@ def extract_drugs(text):
 
     for block in blocks:
         block = re.sub(r"[\"']", " ", block)
-
-        drugs.append(
-            {
-                "license": clean_quotes(re.search(r"許可證字號[:：]?\s*(\S+)", block).group(1)) if re.search(r"許可證字號[:：]?\s*(\S+)", block) else "",
-                "name": clean_quotes(re.search(r"商品名/學名[:：]?\s*([^\n]+)", block).group(1).strip()) if re.search(r"商品名/學名[:：]?\s*([^\n]+)", block) else "",
-                "dosage": clean_quotes(re.search(r"劑量[:：]?\s*([^\n]+)", block).group(1).strip()) if re.search(r"劑量[:：]?\s*([^\n]+)", block) else "",
-                "route": clean_quotes(re.search(r"用法[:：]?\s*([^\n]+)", block).group(1).strip()) if re.search(r"用法[:：]?\s*([^\n]+)", block) else "",
-                "start_date": re.search(r"開始日期[:：]?\s*(\d+年\d+月\d+日)", block).group(1) if re.search(r"開始日期[:：]?\s*(\d+年\d+月\d+日)", block) else "",
-                "end_date": re.search(r"結束日期[:：]?\s*(\d+年\d+月\d+日)", block).group(1) if re.search(r"結束日期[:：]?\s*(\d+年\d+月\d+日)", block) else "",
-                "indication": clean_quotes(re.search(r"(?:用藥原因|用途原因)[:：]?\s*([^\n]+)", block).group(1).strip()) if re.search(r"(?:用藥原因|用途原因)[:：]?\s*([^\n]+)", block) else "",
-                "manufacturer": clean_quotes(re.search(r"(?:廠牌|藥廠|副作用|批號)[:：]?\s*([^\n]+)", block).group(1).strip()) if re.search(r"(?:廠牌|藥廠|副作用|批號)[:：]?\s*([^\n]+)", block) else "",
-                "action": re.search(r"(停藥|降低劑量|增加劑量|未改變劑量|未知)", block).group(1) if re.search(r"(停藥|降低劑量|增加劑量|未改變劑量|未知)", block) else "",
-                "rechallenge": re.search(r"(有再投予且不良反應發生|有再投予但不良反應未發生|有再投予但結果未知|沒有再投予或未知)", block).group(1) if re.search(r"(有再投予且不良反應發生|有再投予但不良反應未發生|有再投予但結果未知|沒有再投予或未知)", block) else "",
-                "relation": {
-                    "suspected": "可疑藥品" in block,
-                    "concomitant": "併用產品" in block,
-                    "interaction": "交互作用藥品" in block,
-                },
-            }
-        )
+        drugs.append({
+            "license": clean_quotes(re.search(r"許可證字號[:：]?\s*(\S+)", block).group(1)) if re.search(r"許可證字號[:：]?\s*(\S+)", block) else "",
+            "name": clean_quotes(re.search(r"商品名/學名[:：]?\s*([^\n]+)", block).group(1).strip()) if re.search(r"商品名/學名[:：]?\s*([^\n]+)", block) else "",
+            "dosage": clean_quotes(re.search(r"劑量[:：]?\s*([^\n]+)", block).group(1).strip()) if re.search(r"劑量[:：]?\s*([^\n]+)", block) else "",
+            "route": clean_quotes(re.search(r"用法[:：]?\s*([^\n]+)", block).group(1).strip()) if re.search(r"用法[:：]?\s*([^\n]+)", block) else "",
+            "start_date": re.search(r"開始日期[:：]?\s*(\d+年\d+月\d+日)", block).group(1) if re.search(r"開始日期[:：]?\s*(\d+年\d+月\d+日)", block) else "",
+            "end_date": re.search(r"結束日期[:：]?\s*(\d+年\d+月\d+日)", block).group(1) if re.search(r"結束日期[:：]?\s*(\d+年\d+月\d+日)", block) else "",
+            "indication": clean_quotes(re.search(r"(?:用藥原因|用途原因)[:：]?\s*([^\n]+)", block).group(1).strip()) if re.search(r"(?:用藥原因|用途原因)[:：]?\s*([^\n]+)", block) else "",
+            "manufacturer": clean_quotes(re.search(r"(?:廠牌|藥廠|副作用|批號)[:：]?\s*([^\n]+)", block).group(1).strip()) if re.search(r"(?:廠牌|藥廠|副作用|批號)[:：]?\s*([^\n]+)", block) else "",
+            "action": re.search(r"(停藥|降低劑量|增加劑量|未改變劑量|未知)", block).group(1) if re.search(r"(停藥|降低劑量|增加劑量|未改變劑量|未知)", block) else "",
+            "rechallenge": re.search(r"(有再投予且不良反應發生|有再投予但不良反應未發生|有再投予但結果未知|沒有再投予或未知)", block).group(1) if re.search(r"(有再投予且不良反應發生|有再投予但不良反應未發生|有再投予但結果未知|沒有再投予或未知)", block) else "",
+            "relation": {
+                "suspected": "可疑藥品" in block,
+                "concomitant": "併用產品" in block,
+                "interaction": "交互作用藥品" in block,
+            },
+        })
 
     return drugs
 
 def extract_medical_history(text):
-    # DOTALL 讓它能跨行抓到區塊
     block_match = re.search(r"其他相關資訊.*?(\(請提供.*?\))?(.*?)用藥原因", text, re.DOTALL)
     block = block_match.group(2).strip() if block_match else ""
 
-    # 修正原本的 \n 寫法（原本是 \\n，會變成抓不到換行）
     diagnosis = re.findall(r"診斷\d*[:：]?\s*([^\[#\n]+)", block)
     allergy = re.search(r"過敏[:：]?\s*([^\[#\n]+)", block)
     smoking = re.search(r"(吸菸|飲酒)[^\n]*?(無|有)", block)
@@ -206,41 +216,62 @@ def extract_text():
             part_number = None
             structured_json = None
 
+            debug = {
+                "used_pymupdf": False,
+                "used_ocr_pdf": False,
+                "used_ocr_images": False,
+                "pymupdf_len": 0,
+                "ocr_pdf_len": 0,
+                "ocr_images_len": 0,
+                "ocr_pdf_error": None,
+                "ocr_images_error": None,
+            }
+
             if filename.startswith("C"):
-                # ✅ 不做 OCR：怨訴編號直接從檔名取得
                 extracted_complaint = extract_complaint_id_from_filename(filename)
-                extracted_part = ""  # 若不需要料號就留空
-
-                part_info = f"料號: {extracted_part}" if extracted_part else ""
-                complaint_info = f"怨訴編號: {extracted_complaint}" if extracted_complaint else ""
-
-                if part_info and complaint_info:
-                    part_number = f"{part_info}, {complaint_info}"
-                elif part_info:
-                    part_number = part_info
-                elif complaint_info:
-                    part_number = complaint_info
-                else:
-                    part_number = "[No part number or complaint ID found]"
-
-                structured_json = {
-                    "part_number": extracted_part,
-                    "complaint_id": extracted_complaint,
-                }
+                structured_json = {"part_number": "", "complaint_id": extracted_complaint}
+                part_number = f"怨訴編號: {extracted_complaint}" if extracted_complaint else "[No complaint ID found]"
 
             elif filename.startswith("TW-TFDA"):
                 pdf_bytes = read_file_bytes(file)
 
-                # 1) 先抽文字層
+                # 1) PyMuPDF 抽文字層
+                debug["used_pymupdf"] = True
                 raw_text = extract_text_from_pdf_bytes(pdf_bytes)
+                debug["pymupdf_len"] = len(raw_text)
 
-                # 2) 抽不到再 OCR（掃描 PDF 常見）
-                if len(raw_text.strip()) < 50:
-                    ocr_text = ocr_space_api_base64_from_bytes(pdf_bytes, engine=2)
-                    ocr_text = clean_text(ocr_text)
-                    # OCR 有結果才覆蓋，避免 OCR 失敗反而把原本少量文字洗掉
-                    if ocr_text:
-                        raw_text = ocr_text
+                # 2) 不夠就 OCR（PDF base64）
+                if len(raw_text) < 80:
+                    debug["used_ocr_pdf"] = True
+                    try:
+                        ocr_text, ocr_resp = ocr_space_pdf_base64(pdf_bytes, engine=2, language="cht")
+                        debug["ocr_pdf_len"] = len(ocr_text)
+                        # OCR.space 如果處理失敗通常會有錯誤欄位
+                        if ocr_resp.get("IsErroredOnProcessing"):
+                            debug["ocr_pdf_error"] = ocr_resp.get("ErrorMessage") or ocr_resp.get("ErrorDetails") or "IsErroredOnProcessing=true"
+                        if ocr_text:
+                            raw_text = ocr_text
+                    except Exception as e:
+                        debug["ocr_pdf_error"] = str(e)
+
+                # 3) OCR(PDF) 還是空 → 轉圖片 OCR
+                if len(raw_text) < 80:
+                    debug["used_ocr_images"] = True
+                    try:
+                        page_imgs = pdf_pages_to_png_bytes(pdf_bytes, max_pages=3, zoom=2.0)
+                        parts = []
+                        for img in page_imgs:
+                            t, resp = ocr_space_image_base64(img, engine=2, language="cht")
+                            if resp.get("IsErroredOnProcessing"):
+                                debug["ocr_images_error"] = resp.get("ErrorMessage") or resp.get("ErrorDetails") or "IsErroredOnProcessing=true"
+                            if t:
+                                parts.append(t)
+                        joined = clean_text(" ".join(parts))
+                        debug["ocr_images_len"] = len(joined)
+                        if joined:
+                            raw_text = joined
+                    except Exception as e:
+                        debug["ocr_images_error"] = str(e)
 
                 structured_json = {
                     "case_id": extract_case_id(raw_text),
@@ -257,17 +288,15 @@ def extract_text():
                 raw_text = "[Unsupported filename format]"
                 part_number = "[Unsupported filename format]"
                 structured_json = {}
+                debug = {"note": "Unsupported filename format"}
 
-            results.append(
-                {
-                    "filename": filename,
-                    "part_number": part_number,
-                    "raw_text": raw_text,
-                    "structured_json": json.dumps(structured_json, ensure_ascii=False)
-                    if isinstance(structured_json, dict)
-                    else structured_json,
-                }
-            )
+            results.append({
+                "filename": filename,
+                "part_number": part_number,
+                "raw_text": raw_text,
+                "structured_json": json.dumps(structured_json, ensure_ascii=False) if isinstance(structured_json, dict) else structured_json,
+                "debug": debug,  # ✅ 你在 Make 直接看到問題點
+            })
 
         except Exception as e:
             results.append({"filename": file.filename, "error": str(e)})
@@ -278,7 +307,6 @@ def extract_text():
         mimetype="application/json",
     )
 
-# ---------- 啟動 Flask ----------
 if __name__ == "__main__":
     port = int(str(os.environ.get("PORT", "10000")).strip())
     app.run(host="0.0.0.0", port=port)
